@@ -14,6 +14,7 @@
 	<a href="/" style="color: white; font-weight: 700; font-size: 1.1rem; text-decoration: none;">Skolebibliotek</a>
 	<a href="/planner" style="color: var(--color-primary-light); text-decoration: none; font-weight: 500;">Planlegger</a>
 	<a href="/bank" style="color: var(--color-primary-light); text-decoration: none; font-weight: 500;">Dokumentbank</a>
+	<a href="/statistikk" style="color: var(--color-primary-light); text-decoration: none; font-weight: 500;">Statistikk</a>
 </nav>
 
 <main style="padding: var(--spacing-xl) var(--spacing-lg); max-width: 1200px; margin: 0 auto;">
