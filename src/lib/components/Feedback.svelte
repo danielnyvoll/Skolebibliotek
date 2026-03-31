@@ -19,9 +19,9 @@
 		}
 	});
 
-	if (!visible) return null;
 </script>
 
+{#if visible}
 <div class="feedback {type}">
 	{message}
 	{#if onDismiss}
@@ -29,7 +29,7 @@
 			type="button"
 			onclick={() => {
 				visible = false;
-				onDismiss();
+				onDismiss?.();
 			}}
 			style="background: none; color: inherit; border: none; cursor: pointer; margin-left: var(--spacing-sm); text-decoration: underline; padding: 0;"
 		>
@@ -37,3 +37,4 @@
 		</button>
 	{/if}
 </div>
+{/if}

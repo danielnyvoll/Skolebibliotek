@@ -3,10 +3,10 @@ import {
 	getTableData,
 	getFilterSpec,
 	getFilterVerdier,
-	listTables,
 	setElevBase,
 	buildQuery,
-	TABELLER
+	EKSPORT_ID,
+	type EksportIdKey
 } from '$lib/api/udir/elevundersokelsenClient';
 import { resolveBase } from '$lib/api/udir/baseResolver';
 import { env } from '$env/dynamic/private';
@@ -23,7 +23,8 @@ export async function GET({ url }) {
 	// ── Debug info ───────────────────────────────────────────────────────────
 	if (action === 'debug') {
 		const base = await resolveBase();
-		const tableId = Number(url.searchParams.get('tableId') ?? TABELLER.FYLKE);
+		const tabelKey = (url.searchParams.get('tabell') ?? 'INDIKATOR_GRUNNSKOLE') as EksportIdKey;
+		const tableId = EKSPORT_ID[tabelKey] ?? EKSPORT_ID.INDIKATOR_GRUNNSKOLE;
 		const sampleParams = { Aar: '2023', Trinn: '7' };
 		const sampleUrl = `${base}/Eksport/${tableId}/data?${buildQuery(sampleParams)}`;
 
@@ -38,22 +39,13 @@ export async function GET({ url }) {
 		}
 
 		console.info('[udir debug] base:', base, '| sample URL:', sampleUrl, '| status:', sampleStatus);
-		return json({ base, sampleUrl, sampleStatus });
-	}
-
-	// ── Available tables ─────────────────────────────────────────────────────
-	if (action === 'tables') {
-		try {
-			const data = await listTables();
-			return json({ data });
-		} catch (e: unknown) {
-			return json({ error: String(e) }, { status: 502 });
-		}
+		return json({ base, sampleUrl, sampleStatus, eksportIds: EKSPORT_ID });
 	}
 
 	// ── filterSpec ───────────────────────────────────────────────────────────
 	if (action === 'filterspec') {
-		const tableId = Number(url.searchParams.get('tableId') ?? TABELLER.FYLKE);
+		const tabelKey = (url.searchParams.get('tabell') ?? 'INDIKATOR_GRUNNSKOLE') as EksportIdKey;
+		const tableId = EKSPORT_ID[tabelKey] ?? EKSPORT_ID.INDIKATOR_GRUNNSKOLE;
 		try {
 			const data = await getFilterSpec(tableId);
 			return json({ data });
@@ -64,7 +56,8 @@ export async function GET({ url }) {
 
 	// ── filterVerdier ────────────────────────────────────────────────────────
 	if (action === 'filterverdier') {
-		const tableId = Number(url.searchParams.get('tableId') ?? TABELLER.FYLKE);
+		const tabelKey = (url.searchParams.get('tabell') ?? 'INDIKATOR_GRUNNSKOLE') as EksportIdKey;
+		const tableId = EKSPORT_ID[tabelKey] ?? EKSPORT_ID.INDIKATOR_GRUNNSKOLE;
 		const filterId = url.searchParams.get('filterId') ?? undefined;
 		try {
 			const data = await getFilterVerdier(tableId, filterId);
@@ -75,19 +68,12 @@ export async function GET({ url }) {
 	}
 
 	// ── Data ─────────────────────────────────────────────────────────────────
-	const nivaa = url.searchParams.get('nivaa') ?? 'fylke';
+	const tabelKey = (url.searchParams.get('tabell') ?? 'INDIKATOR_GRUNNSKOLE') as EksportIdKey;
 	const geografi = url.searchParams.get('geografi') ?? '';
 	const aarParam = url.searchParams.get('aar') ?? '2023';
 	const trinn = url.searchParams.get('trinn') ?? '7';
 
-	const tableId =
-		nivaa === 'skole'
-			? TABELLER.SKOLE
-			: nivaa === 'kommune'
-				? TABELLER.KOMMUNE
-				: nivaa === 'fylke'
-					? TABELLER.FYLKE
-					: TABELLER.NASJONALT;
+	const tableId = EKSPORT_ID[tabelKey] ?? EKSPORT_ID.INDIKATOR_GRUNNSKOLE;
 
 	// Build params — keys will be sorted alphabetically inside buildQuery
 	const params: Record<string, string | number | (string | number)[]> = {

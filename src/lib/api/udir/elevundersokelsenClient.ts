@@ -11,14 +11,16 @@ async function base(): Promise<string> {
 	return _envOverride ?? resolveBase();
 }
 
-// ── Table IDs — verify with GET /Eksport/ ────────────────────────────────────
-// These are reasonable defaults; real IDs come from listTables()
-export const TABELLER = {
-	NASJONALT: 1,
-	FYLKE: 2,
-	KOMMUNE: 3,
-	SKOLE: 4
+// ── Eksport-ID-er — faste, ikke oppdaget dynamisk ────────────────────────────
+export const EKSPORT_ID = {
+	INDIKATOR_GRUNNSKOLE: 148,
+	TEMA_GRUNNSKOLE: 149,
+	MOBBING_GRUNNSKOLE: 150,
+	DELTAKELSE_GRUNNSKOLE: 151,
+	INDIKATOR_VIDEREGAENDE: 152
 } as const;
+
+export type EksportIdKey = keyof typeof EKSPORT_ID;
 
 // ── Types ────────────────────────────────────────────────────────────────────
 export interface UdirDimensjon {
@@ -72,11 +74,6 @@ export function buildQuery(params: Record<string, string | number | (string | nu
 }
 
 // ── API methods ───────────────────────────────────────────────────────────────
-export async function listTables(): Promise<unknown[]> {
-	const b = await base();
-	return udirFetch<unknown[]>(`${b}/Eksport`, { ttl: 60 * 60_000 });
-}
-
 export async function getFilterSpec(tableId: number): Promise<FilterSpec[]> {
 	const b = await base();
 	return udirFetch<FilterSpec[]>(`${b}/Eksport/${tableId}/filterSpec`, { ttl: 60 * 60_000 });
