@@ -1,8 +1,18 @@
 import { udirFetch } from './fetchWrapper';
+import { resolveBase } from './baseResolver';
 
-export let ELEV_BASE = 'https://api.udir-statistikkbanken.no/api/rest/v2';
+// env override still supported (set before first call)
+let _envOverride: string | null = null;
+export function setElevBase(url: string) {
+	_envOverride = url;
+}
 
-// Known table numbers — verify/extend against /api/rest/v2/Eksport
+async function base(): Promise<string> {
+	return _envOverride ?? resolveBase();
+}
+
+// ── Table IDs — verify with GET /Eksport/ ────────────────────────────────────
+// These are reasonable defaults; real IDs come from listTables()
 export const TABELLER = {
 	NASJONALT: 1,
 	FYLKE: 2,
@@ -10,6 +20,7 @@ export const TABELLER = {
 	SKOLE: 4
 } as const;
 
+// ── Types ────────────────────────────────────────────────────────────────────
 export interface UdirDimensjon {
 	dimensjonNavn: string;
 	dimensjonVerdi: string;
@@ -18,7 +29,8 @@ export interface UdirDimensjon {
 
 export interface UdirRad {
 	verdi: number | null;
-	erSkjermet: boolean; // prikket/skjermet verdi
+	/** true when the value is shielded ("prikket") — MUST NOT be plotted as 0 */
+	erSkjermet: boolean;
 	dimensjoner: UdirDimensjon[];
 }
 
@@ -31,16 +43,27 @@ export interface UdirRespons {
 	};
 }
 
-export function setElevBase(url: string) {
-	ELEV_BASE = url;
+export interface FilterSpec {
+	filterId: string;
+	displayNavn?: string;
+	obligatorisk?: boolean;
 }
 
+export interface FilterVerdi {
+	verdi: string;
+	displayNavn?: string;
+}
+
+// ── Query builder ─────────────────────────────────────────────────────────────
 /**
- * Builds Udir-style query string: Aar(2023)_Trinn(7)_Geografi(Fylke_03)
- * Params with array values join with comma: Aar(2022,2023)
+ * Builds Udir query string.
+ * Keys are sorted alphabetically as required by the API spec.
+ * Example: Aar(2023)_Trinn(7)  →  sorted: Aar < Trinn ✓
+ * Array values: Aar(2022,2023)
  */
 export function buildQuery(params: Record<string, string | number | (string | number)[]>): string {
 	return Object.entries(params)
+		.sort(([a], [b]) => a.localeCompare(b))
 		.map(([k, v]) => {
 			const val = Array.isArray(v) ? v.join(',') : v;
 			return `${k}(${val})`;
@@ -48,20 +71,39 @@ export function buildQuery(params: Record<string, string | number | (string | nu
 		.join('_');
 }
 
+// ── API methods ───────────────────────────────────────────────────────────────
+export async function listTables(): Promise<unknown[]> {
+	const b = await base();
+	return udirFetch<unknown[]>(`${b}/Eksport`, { ttl: 60 * 60_000 });
+}
+
+export async function getFilterSpec(tableId: number): Promise<FilterSpec[]> {
+	const b = await base();
+	return udirFetch<FilterSpec[]>(`${b}/Eksport/${tableId}/filterSpec`, { ttl: 60 * 60_000 });
+}
+
+export async function getFilterVerdier(
+	tableId: number,
+	filterId?: string
+): Promise<FilterVerdi[]> {
+	const b = await base();
+	const qs = filterId ? `?filterId=${encodeURIComponent(filterId)}` : '';
+	return udirFetch<FilterVerdi[]>(`${b}/Eksport/${tableId}/filterVerdier${qs}`, {
+		ttl: 30 * 60_000
+	});
+}
+
 export async function getTableData(
-	tableNr: number,
+	tableId: number,
 	params: Record<string, string | number | (string | number)[]>
 ): Promise<UdirRespons> {
+	const b = await base();
 	const qs = buildQuery(params);
-	const url = `${ELEV_BASE}/Eksport/${tableNr}/data?${qs}`;
+	const url = `${b}/Eksport/${tableId}/data?${qs}`;
 	return udirFetch<UdirRespons>(url, { ttl: 10 * 60_000 });
 }
 
-export async function listTables(): Promise<unknown[]> {
-	return udirFetch<unknown[]>(`${ELEV_BASE}/Eksport`, { ttl: 60 * 60_000 });
-}
-
-/** Helper: extract a dimension value by name from a row */
+/** Extract a dimension value by name (case-insensitive) */
 export function getDim(rad: UdirRad, navn: string): string | undefined {
 	return rad.dimensjoner.find(d => d.dimensjonNavn.toLowerCase() === navn.toLowerCase())
 		?.dimensjonVerdi;

@@ -156,15 +156,18 @@
 
 			if (!byTopic.has(topic)) byTopic.set(topic, { values: [], skjermet: 0 });
 			const t = byTopic.get(topic)!;
-			if (rad.erSkjermet) {
-				t.skjermet++;
-			} else if (rad.verdi !== null) {
-				t.values.push(rad.verdi);
-			}
-
 			if (!byYear.has(aar)) byYear.set(aar, new Map());
 			const y = byYear.get(aar)!;
-			y.set(topic, rad.erSkjermet ? null : rad.verdi);
+
+			if (rad.erSkjermet) {
+				// Shielded ("prikket") — store explicit null, NEVER 0
+				t.skjermet++;
+				y.set(topic, null);
+			} else if (rad.verdi !== null) {
+				t.values.push(rad.verdi);
+				y.set(topic, rad.verdi);
+			}
+			// verdi===null && !erSkjermet → missing data, leave absent (charts treat as gap)
 		}
 
 		const years = [...byYear.keys()].sort();
