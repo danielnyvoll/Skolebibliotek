@@ -1,45 +1,63 @@
 import { udirFetch } from './fetchWrapper';
 
-// Base URL — override via NXR_API_URL env on server side
 export let NXR_BASE = 'https://data-nxr-fellestjeneste.udir.no';
+
+export function setNxrBase(url: string) {
+	NXR_BASE = url;
+}
+
+// ── Types ─────────────────────────────────────────────────────────────────────
+// Field names are inferred; adjust if actual /api/v2/ responses differ.
 
 export interface Fylke {
 	fylkesnummer: string;
 	navn: string;
+	[k: string]: unknown;
 }
 
 export interface Kommune {
 	kommunenummer: string;
 	navn: string;
 	fylkesnummer: string;
+	[k: string]: unknown;
 }
 
-export interface Skole {
-	nsrId: string;
-	navn: string;
-	kommunenummer: string;
-	kommuneNavn: string;
-	fylkesnummer: string;
-	organisasjonsnummer?: string;
+// ── Fetch with sanity log ─────────────────────────────────────────────────────
+async function nxrFetch<T>(url: string): Promise<T> {
+	let status = '(cached)';
+	try {
+		// Peek at status before handing off to cache layer
+		const ctrl = new AbortController();
+		const timer = setTimeout(() => ctrl.abort(), 10_000);
+		const res = await fetch(url, { signal: ctrl.signal });
+		clearTimeout(timer);
+		status = String(res.status);
+		console.info(`[nxr] GET ${url} → ${status}`);
+		if (!res.ok) throw new Error(`HTTP ${status} — ${url}`);
+		const data = (await res.json()) as T;
+		// Warm the udirFetch cache so repeated calls are free
+		return udirFetch<T>(url, { ttl: 30 * 60_000 }).catch(() => data);
+	} catch (err) {
+		console.error(`[nxr] GET ${url} → ${status}`, err);
+		throw err;
+	}
 }
 
-export function setNxrBase(url: string) {
-	NXR_BASE = url;
-}
+// ── API methods — paths confirmed against /swagger/index.html ─────────────────
 
+/** All fylker */
 export async function getFylker(): Promise<Fylke[]> {
-	// NOTE: verify exact endpoint path against Swagger at /swagger/index.html
-	return udirFetch<Fylke[]>(`${NXR_BASE}/api/Geografi/fylke`, { ttl: 30 * 60_000 });
+	return nxrFetch<Fylke[]>(`${NXR_BASE}/api/v2/fylkedata`);
 }
 
-export async function getKommuner(fylkesnummer?: string): Promise<Kommune[]> {
-	const qs = fylkesnummer ? `?fylkenummer=${fylkesnummer}` : '';
-	return udirFetch<Kommune[]>(`${NXR_BASE}/api/Geografi/kommune${qs}`, { ttl: 30 * 60_000 });
+/** All kommuner (no filter) */
+export async function getKommuner(): Promise<Kommune[]> {
+	return nxrFetch<Kommune[]>(`${NXR_BASE}/api/v2/kommunedata`);
 }
 
-export async function getSkoler(kommunenummer: string): Promise<Skole[]> {
-	return udirFetch<Skole[]>(
-		`${NXR_BASE}/api/Geografi/enhet?kommunenummer=${kommunenummer}`,
-		{ ttl: 30 * 60_000 }
+/** Kommuner for a specific fylke */
+export async function getKommunerForFylke(fylkesnummer: string): Promise<Kommune[]> {
+	return nxrFetch<Kommune[]>(
+		`${NXR_BASE}/api/v2/kommunedatamedfylkenummer?fylkenummer=${encodeURIComponent(fylkesnummer)}`
 	);
 }
