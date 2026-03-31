@@ -20,7 +20,8 @@ export async function GET({ url }) {
 
 	try {
 		if (type === 'fylker') {
-			const alle = unwrap<{ navn: string }>(await getFylker());
+			// getFylker() already returns normalised Fylke[] with string fields
+			const alle = await getFylker();
 			const ostlandet = alle.filter(f => isOstlandet(f.navn));
 			return json({ data: ostlandet });
 		}
