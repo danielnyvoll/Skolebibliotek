@@ -6,7 +6,7 @@ if (!databaseUrl) throw new Error('DATABASE_URL is missing');
 
 const sql = postgres(databaseUrl, {
   ssl: 'require',
-  prepare: false, // viktig for Supabase transaction pooler (no PREPARE)
+  prepare: false, // required for Supabase transaction pooler (port 6543)
   max: 5
 });
 

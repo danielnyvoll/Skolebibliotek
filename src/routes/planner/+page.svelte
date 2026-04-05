@@ -3,6 +3,7 @@
 	import ClassSelector from '$lib/components/ClassSelector.svelte';
 	import WeekSelector from '$lib/components/WeekSelector.svelte';
 	import Feedback from '$lib/components/Feedback.svelte';
+	import TimetableGrid from '$lib/components/TimetableGrid.svelte';
 	import type { CurriculumNote, WeeklyPlan, CalendarEvent } from '$lib/types/domain';
 	import { getJSON, postJSON } from '$lib/api/client';
 
@@ -204,7 +205,7 @@
 
 	$effect(() => { loadPlans(); });
 
-	// ── Ukeplan (existing) ────────────────────────────────────────────────────
+	// ── Ukeplan state ─────────────────────────────────────────────────────────
 	let classId = $state<number | null>(null);
 	let weekStart = $state(getMonday());
 	let curriculumNotes = $state('');
@@ -219,6 +220,35 @@
 	let newEventTime = $state('');
 	let newEventTitle = $state('');
 	let newEventAgenda = $state('');
+
+	// ── Ukeplan stepper ────────────────────────────────────────────────────────
+	let ukeStepper = $state(1);
+
+	// ── Timetable ──────────────────────────────────────────────────────────────
+	interface TimetableEntry {
+		id: number;
+		weekday: number;
+		start_time: string;
+		end_time: string;
+		subject: string;
+		title?: string | null;
+		room?: string | null;
+		notes?: string | null;
+		color?: string | null;
+	}
+
+	let timetableEntries = $state<TimetableEntry[]>([]);
+	let loadingTimetable = $state(false);
+	let savingEntry = $state(false);
+	let newEntry = $state({
+		weekday: 1,
+		start_time: '08:00',
+		end_time: '09:00',
+		subject: '',
+		title: '',
+		room: '',
+		color: '#3b82f6'
+	});
 
 	function getMonday(): string {
 		const now = new Date();
@@ -296,11 +326,64 @@
 		}
 	}
 
-	$effect(() => {
-		if (classId && weekStart && activeMainTab === 'ukeplan') {
-			loadWeekData();
+	async function loadTimetable() {
+		if (!classId) return;
+		loadingTimetable = true;
+		try {
+			timetableEntries = await getJSON<TimetableEntry[]>(
+				`/api/timetable?class_id=${classId}&week_start=${weekStart}`
+			);
+		} catch {
+			feedback = { message: 'Feil ved lasting av timeplan', type: 'error' };
+		} finally {
+			loadingTimetable = false;
 		}
-	});
+	}
+
+	async function addTimetableEntry() {
+		if (!classId || !newEntry.subject.trim()) {
+			feedback = { message: 'Fag er påkrevd', type: 'error' };
+			return;
+		}
+		savingEntry = true;
+		try {
+			const res = await fetch('/api/timetable', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					class_id: classId,
+					week_start: weekStart,
+					weekday: newEntry.weekday,
+					start_time: newEntry.start_time,
+					end_time: newEntry.end_time,
+					subject: newEntry.subject.trim(),
+					title: newEntry.title.trim() || null,
+					room: newEntry.room.trim() || null,
+					color: newEntry.color
+				})
+			});
+			if (!res.ok) throw new Error(`HTTP ${res.status}`);
+			const created = (await res.json()) as TimetableEntry;
+			timetableEntries = [...timetableEntries, created];
+			newEntry.subject = '';
+			newEntry.title = '';
+			newEntry.room = '';
+		} catch {
+			feedback = { message: 'Feil ved lagring av timeplan-økt', type: 'error' };
+		} finally {
+			savingEntry = false;
+		}
+	}
+
+	async function deleteTimetableEntry(id: number) {
+		try {
+			const res = await fetch(`/api/timetable?id=${id}`, { method: 'DELETE' });
+			if (!res.ok) throw new Error(`HTTP ${res.status}`);
+			timetableEntries = timetableEntries.filter(e => e.id !== id);
+		} catch {
+			feedback = { message: 'Feil ved sletting av økt', type: 'error' };
+		}
+	}
 </script>
 
 <svelte:head>
@@ -528,15 +611,42 @@
 
 <!-- ══ Ukeplan tab ═══════════════════════════════════════════════════════════ -->
 {:else}
-	<div class="card" style="margin-bottom: 1rem;">
-		<ClassSelector {classId} onClassChange={(id) => { classId = id; }} />
+	<!-- Stepper indicator (5 steps) -->
+	<div class="wizard-steps" aria-label="Ukeplan-fremdrift" style="margin-bottom: 1.5rem;">
+		{#each ['Klasse', 'Uke', 'Innhold', 'Timeplan', 'Publiser'] as stepLabel, i}
+			{@const s = i + 1}
+			<div class="wizard-step" class:active={ukeStepper === s} class:done={ukeStepper > s}>
+				<div class="step-num">{ukeStepper > s ? '✓' : s}</div>
+				<span class="step-label">{stepLabel}</span>
+			</div>
+		{/each}
 	</div>
 
-	{#if classId}
-		<div class="card" style="margin-bottom: 1rem;">
-			<WeekSelector {weekStart} onWeekChange={(w) => { weekStart = w; }} />
+	<!-- Step 1: Velg klasse -->
+	{#if ukeStepper === 1}
+		<div class="card">
+			<h2 style="font-size: 1.1rem; margin-bottom: 1rem;">Velg klasse</h2>
+			<ClassSelector {classId} onClassChange={(id) => { classId = id; }} />
+			<div style="margin-top: 1.25rem;">
+				<button disabled={!classId} onclick={() => (ukeStepper = 2)}>
+					Neste: Velg uke →
+				</button>
+			</div>
 		</div>
 
+	<!-- Step 2: Velg uke -->
+	{:else if ukeStepper === 2}
+		<div class="card">
+			<h2 style="font-size: 1.1rem; margin-bottom: 1rem;">Velg uke</h2>
+			<WeekSelector {weekStart} onWeekChange={(w) => { weekStart = w; }} />
+			<div style="margin-top: 1.25rem;" class="button-group">
+				<button onclick={() => { loadWeekData(); ukeStepper = 3; }}>Neste: Innhold →</button>
+				<button class="button-secondary" onclick={() => (ukeStepper = 1)}>← Tilbake</button>
+			</div>
+		</div>
+
+	<!-- Step 3: Innhold (pensum + ukeplan) -->
+	{:else if ukeStepper === 3}
 		{#if loadingWeek}
 			<div class="card skeleton-block" style="height: 200px; margin-bottom: 1rem;"></div>
 		{:else}
@@ -574,12 +684,109 @@
 				</button>
 			</div>
 
-			<div class="card">
-				<h2 class="section-title">Hendelser</h2>
+			<div class="button-group">
+				<button onclick={() => { loadTimetable(); ukeStepper = 4; }}>Neste: Timeplan →</button>
+				<button class="button-secondary" onclick={() => (ukeStepper = 2)}>← Tilbake</button>
+			</div>
+		{/if}
+
+	<!-- Step 4: Timeplan -->
+	{:else if ukeStepper === 4}
+		<div class="card" style="margin-bottom: 1rem;">
+			<h2 class="section-title">Timeplan</h2>
+			<p style="color: var(--color-text-light); font-size: 0.875rem; margin-bottom: 1rem;">
+				Sett opp timeplanen for uka. Hold over en blokk for å se detaljer.
+			</p>
+
+			{#if loadingTimetable}
+				<div class="skeleton-block" style="height: 200px; border-radius: var(--radius-md);"></div>
+			{:else}
+				<TimetableGrid entries={timetableEntries} onDelete={deleteTimetableEntry} />
+			{/if}
+
+			<!-- Add entry form -->
+			<div class="add-okt-form card" style="background: var(--color-bg-light); margin-top: 1rem;">
+				<h3 style="font-size: 0.9rem; margin-bottom: 0.75rem;">+ Legg til timeplan-økt</h3>
+				<div class="tt-form-row">
+					<div class="form-group" style="margin-bottom: 0;">
+						<label for="tt-day">Dag</label>
+						<select id="tt-day" bind:value={newEntry.weekday}>
+							<option value={1}>Mandag</option>
+							<option value={2}>Tirsdag</option>
+							<option value={3}>Onsdag</option>
+							<option value={4}>Torsdag</option>
+							<option value={5}>Fredag</option>
+						</select>
+					</div>
+					<div class="form-group" style="margin-bottom: 0;">
+						<label for="tt-start">Fra</label>
+						<input id="tt-start" type="time" bind:value={newEntry.start_time} />
+					</div>
+					<div class="form-group" style="margin-bottom: 0;">
+						<label for="tt-end">Til</label>
+						<input id="tt-end" type="time" bind:value={newEntry.end_time} />
+					</div>
+				</div>
+				<div class="tt-form-row" style="margin-top: 0.75rem;">
+					<div class="form-group" style="margin-bottom: 0;">
+						<label for="tt-subject">Fag *</label>
+						<input id="tt-subject" type="text" placeholder="f.eks. Norsk" bind:value={newEntry.subject} />
+					</div>
+					<div class="form-group" style="margin-bottom: 0;">
+						<label for="tt-title">Tema (valgfritt)</label>
+						<input id="tt-title" type="text" placeholder="f.eks. Diktatoppgave" bind:value={newEntry.title} />
+					</div>
+					<div class="form-group" style="margin-bottom: 0;">
+						<label for="tt-room">Rom</label>
+						<input id="tt-room" type="text" placeholder="f.eks. B204" bind:value={newEntry.room} />
+					</div>
+				</div>
+				<div style="display: flex; align-items: flex-end; gap: 0.75rem; margin-top: 0.75rem;">
+					<div class="form-group" style="margin-bottom: 0;">
+						<label for="tt-color">Farge</label>
+						<input id="tt-color" type="color" bind:value={newEntry.color} style="height: 38px; padding: 2px 4px; width: 60px;" />
+					</div>
+					<button class="button-secondary" onclick={addTimetableEntry} disabled={savingEntry}>
+						{savingEntry ? 'Lagrer…' : 'Legg til'}
+					</button>
+				</div>
+			</div>
+
+			<div class="button-group" style="margin-top: 1rem;">
+				<button onclick={() => (ukeStepper = 5)}>Neste: Publiser →</button>
+				<button class="button-secondary" onclick={() => (ukeStepper = 3)}>← Tilbake</button>
+			</div>
+		</div>
+
+	<!-- Step 5: Publiser -->
+	{:else if ukeStepper === 5}
+		<div class="card" style="margin-bottom: 1rem;">
+			<h2 class="section-title">Oppsummering og publisering</h2>
+			<div class="summary-grid">
+				<div class="summary-block">
+					<div class="summary-label">Klasse</div>
+					<div class="summary-val">{classId ? `ID ${classId}` : '—'}</div>
+				</div>
+				<div class="summary-block">
+					<div class="summary-label">Uke fra</div>
+					<div class="summary-val">{weekStart}</div>
+				</div>
+				<div class="summary-block">
+					<div class="summary-label">Timeplan-økter</div>
+					<div class="summary-val">{timetableEntries.length}</div>
+				</div>
+				<div class="summary-block">
+					<div class="summary-label">Pensum</div>
+					<div class="summary-val summary-val-sm">
+						{curriculumNotes.slice(0, 100)}{curriculumNotes.length > 100 ? '…' : ''}
+					</div>
+				</div>
+			</div>
+
+			<div style="margin-top: 1.5rem;">
+				<h3 style="font-size: 0.95rem; margin-bottom: 0.75rem;">Hendelser</h3>
 				{#if calendarEvents.length === 0}
-					<p style="color: var(--color-text-light); margin-bottom: 1rem; font-size: 0.9rem;">
-						Ingen hendelser registrert denne uka.
-					</p>
+					<p style="color: var(--color-text-light); font-size: 0.9rem; margin-bottom: 1rem;">Ingen hendelser registrert.</p>
 				{:else}
 					<ul style="margin-bottom: 1rem; list-style: none;">
 						{#each calendarEvents as event}
@@ -593,52 +800,58 @@
 						{/each}
 					</ul>
 				{/if}
-				<button
-					class="button-secondary"
-					onclick={() => (showNewEventForm = true)}
-				>+ Legg til hendelse</button>
-
-				{#if showNewEventForm}
-					<div class="modal-overlay" onclick={(e) => e.target === e.currentTarget && (showNewEventForm = false)}>
-						<div class="modal">
-							<h2>Ny hendelse</h2>
-							<div class="form-group">
-								<label for="ev-type">Type</label>
-								<select id="ev-type" bind:value={newEventType}>
-									<option value="ferie">Ferie</option>
-									<option value="elevsamtale">Elevsamtale</option>
-									<option value="foreldremøte">Foreldremøte</option>
-								</select>
-							</div>
-							<div class="form-group">
-								<label for="ev-date">Dato</label>
-								<input id="ev-date" type="date" bind:value={newEventDate} />
-							</div>
-							<div class="form-group">
-								<label for="ev-time">Tid (valgfritt)</label>
-								<input id="ev-time" type="time" bind:value={newEventTime} />
-							</div>
-							<div class="form-group">
-								<label for="ev-title">Tittel</label>
-								<input id="ev-title" type="text" placeholder="f.eks. Påskeferie" bind:value={newEventTitle} />
-							</div>
-							<div class="form-group">
-								<label for="ev-agenda">Agenda (valgfritt)</label>
-								<textarea id="ev-agenda" rows="2" bind:value={newEventAgenda}></textarea>
-							</div>
-							<div class="button-group">
-								<button onclick={addEvent}>Legg til</button>
-								<button class="button-secondary" onclick={() => (showNewEventForm = false)}>Avbryt</button>
-							</div>
-						</div>
-					</div>
-				{/if}
+				<button class="button-secondary" onclick={() => (showNewEventForm = true)}>+ Legg til hendelse</button>
 			</div>
-		{/if}
-	{:else}
-		<div class="empty-state">
-			<div class="empty-icon">📅</div>
-			<p>Velg eller opprett en klasse for å vise og redigere ukeplanen.</p>
+
+			<div class="button-group" style="margin-top: 1.5rem;">
+				<button
+					onclick={async () => {
+						await saveNotes();
+						await savePlanDb();
+						feedback = { message: 'Ukeplan publisert!', type: 'success' };
+						ukeStepper = 1;
+					}}
+				>
+					Publiser ukeplan
+				</button>
+				<button class="button-secondary" onclick={() => (ukeStepper = 4)}>← Tilbake</button>
+			</div>
+		</div>
+	{/if}
+
+	{#if showNewEventForm}
+		<div class="modal-overlay" onclick={(e) => e.target === e.currentTarget && (showNewEventForm = false)}>
+			<div class="modal">
+				<h2>Ny hendelse</h2>
+				<div class="form-group">
+					<label for="ev-type">Type</label>
+					<select id="ev-type" bind:value={newEventType}>
+						<option value="ferie">Ferie</option>
+						<option value="elevsamtale">Elevsamtale</option>
+						<option value="foreldremøte">Foreldremøte</option>
+					</select>
+				</div>
+				<div class="form-group">
+					<label for="ev-date">Dato</label>
+					<input id="ev-date" type="date" bind:value={newEventDate} />
+				</div>
+				<div class="form-group">
+					<label for="ev-time">Tid (valgfritt)</label>
+					<input id="ev-time" type="time" bind:value={newEventTime} />
+				</div>
+				<div class="form-group">
+					<label for="ev-title">Tittel</label>
+					<input id="ev-title" type="text" placeholder="f.eks. Påskeferie" bind:value={newEventTitle} />
+				</div>
+				<div class="form-group">
+					<label for="ev-agenda">Agenda (valgfritt)</label>
+					<textarea id="ev-agenda" rows="2" bind:value={newEventAgenda}></textarea>
+				</div>
+				<div class="button-group">
+					<button onclick={addEvent}>Legg til</button>
+					<button class="button-secondary" onclick={() => (showNewEventForm = false)}>Avbryt</button>
+				</div>
+			</div>
 		</div>
 	{/if}
 {/if}
@@ -809,6 +1022,45 @@
 		color: var(--color-primary);
 	}
 
+	/* Timetable form */
+	.tt-form-row {
+		display: grid;
+		grid-template-columns: repeat(3, 1fr);
+		gap: 0.75rem;
+	}
+
+	/* Summary step */
+	.summary-grid {
+		display: grid;
+		grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+		gap: 0.875rem;
+	}
+	.summary-block {
+		background: var(--color-bg-subtle);
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-md);
+		padding: 0.875rem 1rem;
+	}
+	.summary-label {
+		font-size: 0.75rem;
+		font-weight: 600;
+		color: var(--color-text-muted);
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+		margin-bottom: 0.3rem;
+	}
+	.summary-val {
+		font-size: 1rem;
+		font-weight: 600;
+		color: var(--color-text);
+	}
+	.summary-val-sm {
+		font-size: 0.82rem;
+		font-weight: 400;
+		color: var(--color-text-light);
+		line-height: 1.4;
+	}
+
 	@media (max-width: 640px) {
 		.add-okt-form > div:first-of-type {
 			grid-template-columns: 1fr;
@@ -818,6 +1070,9 @@
 		}
 		.okt-varighet {
 			display: none;
+		}
+		.tt-form-row {
+			grid-template-columns: 1fr;
 		}
 	}
 </style>

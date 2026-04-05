@@ -1,11 +1,16 @@
 /**
- * Probes both known Udir base URLs and returns the first that answers 200
- * on GET /Eksport/. Result is cached for the lifetime of the process.
+ * Probes known UDIR base URLs and returns the first that answers 200.
+ * Result is cached for the lifetime of the process.
+ *
+ * API spec (Swagger): https://statistikkportalen.udir.no/api/rapportering/swagger
+ * Data endpoint format: GET /Eksport/{id}/data?filter=Key(val)_Key(val)&format=Json
  */
 
 export const CANDIDATE_BASES = [
+	// Working open base (no auth required)
 	'https://api.statistikkbanken.udir.no/api/rest/v2',
-	'https://api.udir-statistikkbanken.no/api/rest/v2'
+	// statistikkportalen requires auth — kept as reference only
+	'https://statistikkportalen.udir.no/api/rapportering/rest/v1',
 ] as const;
 
 let _resolved: string | null = null;
@@ -32,7 +37,6 @@ export async function resolveBase(): Promise<string> {
 				console.warn(`[udir] ${base} unreachable: ${err}`);
 			}
 		}
-		// fallback — let actual requests fail with a descriptive error
 		_resolved = CANDIDATE_BASES[0];
 		console.warn(`[udir] no base responded, falling back to ${_resolved}`);
 		return _resolved;
